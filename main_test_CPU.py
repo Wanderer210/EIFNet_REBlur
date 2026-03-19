@@ -1,8 +1,23 @@
-
-import torch
-# print(torch.__version__)
 import os
+import random
+import time
+from collections import OrderedDict
+
+import cv2
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+from skimage.metrics import structural_similarity as SSIM
+from skimage.metrics import peak_signal_noise_ratio as PSNR
+
 from config import Config
+import utils
+from dataset_RGB import *
+from U_model import unet
+from warmup_scheduler import GradualWarmupScheduler
 
 CONFIG_YAML = 'training.yml'
 
@@ -27,6 +42,23 @@ def _read_yaml_scalar(path, key):
     return None
 
 
+def _load_checkpoint(model, weights, device):
+    checkpoint = torch.load(weights, map_location=device)
+
+    if "state_dict" in checkpoint:
+        state_dict = checkpoint["state_dict"]
+    else:
+        state_dict = checkpoint
+
+    new_state_dict = OrderedDict()
+    for k, v in state_dict.items():
+        name = k[7:] if k.startswith('module.') else k
+        new_state_dict[name] = v
+
+    model.load_state_dict(new_state_dict, strict=True)
+    return checkpoint
+
+
 opt = Config(CONFIG_YAML)
 
 test_root = _read_yaml_scalar(CONFIG_YAML, 'father_test_path_npz')
@@ -38,32 +70,16 @@ result_root = _read_yaml_scalar(CONFIG_YAML, 'result_dir')
 if result_root:
     opt.result_dir = result_root
 
-gpus = ','.join([str(i) for i in opt.GPU])
-os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = gpus
-torch.backends.cudnn.benchmark = True
-import cv2
-
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import DataLoader
-import random
-import time
-import numpy as np
-import utils
-from dataset_RGB import *
-
-from U_model import unet
-from warmup_scheduler import GradualWarmupScheduler
-from tqdm import tqdm
-from skimage.metrics import structural_similarity as SSIM
-from skimage.metrics import peak_signal_noise_ratio as PSNR
+# =========================
+# 强制使用 CPU
+# =========================
+device = torch.device('cpu')
+print('Using device:', device)
 
 ######### Set Seeds ###########
 random.seed(1234)
 np.random.seed(1234)
 torch.manual_seed(1234)
-torch.cuda.manual_seed_all(1234)
 
 
 def main():
@@ -79,28 +95,33 @@ def main():
     if getattr(opt, 'result_dir', None) in [None, './output', 'output']:
         opt.result_dir = result_dir
 
-
     ######### Model ###########
-
-    model_restoration = unet.Restoration(3, 6, 3,opt)
-
-    # print(model_restoration)
-    model_restoration.cuda()
-
-    device_ids = [i for i in range(torch.cuda.device_count())]
-    if torch.cuda.device_count() > 1:
-        print("\n\nLet's use", torch.cuda.device_count(), "GPUs!\n\n")
+    model_restoration = unet.Restoration(3, 6, 3, opt)
+    model_restoration = model_restoration.to(device)
 
     new_lr = opt.OPTIM.LR_INITIAL
-
-    optimizer = optim.Adam(model_restoration.parameters(), lr=new_lr, betas=(0.9, 0.999), eps=1e-8)
+    optimizer = optim.Adam(
+        model_restoration.parameters(),
+        lr=new_lr,
+        betas=(0.9, 0.999),
+        eps=1e-8
+    )
 
     ######### Scheduler ###########
     warmup_epochs = 3
-    scheduler_cosine = optim.lr_scheduler.CosineAnnealingLR(optimizer, opt.OPTIM.NUM_EPOCHS - warmup_epochs,
-                                                            eta_min=opt.OPTIM.LR_MIN)
-    scheduler = GradualWarmupScheduler(optimizer, multiplier=1, total_epoch=warmup_epochs,
-                                       after_scheduler=scheduler_cosine)
+    scheduler_cosine = optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        opt.OPTIM.NUM_EPOCHS - warmup_epochs,
+        eta_min=opt.OPTIM.LR_MIN
+    )
+    scheduler = GradualWarmupScheduler(
+        optimizer,
+        multiplier=1,
+        total_epoch=warmup_epochs,
+        after_scheduler=scheduler_cosine
+    )
+
+    # 这里只是为了兼容你原来的逻辑，测试时其实 scheduler/optimizer 基本无关紧要
     scheduler.step()
 
     ######### Resume ###########
@@ -116,29 +137,35 @@ def main():
             raise FileNotFoundError(f'No checkpoint found in: {model_dir}')
 
         print('path_chk_rest', path_chk_rest)
-        utils.load_checkpoint(model_restoration, path_chk_rest[0])
-        start_epoch = utils.load_start_epoch(path_chk_rest[0]) + 1
+        checkpoint = _load_checkpoint(model_restoration, path_chk_rest[0], device)
+        start_epoch = int(checkpoint.get('epoch', 0)) + 1
 
-        utils.load_optim(optimizer, path_chk_rest[0])
+        if 'optimizer' in checkpoint:
+            try:
+                optimizer.load_state_dict(checkpoint['optimizer'])
+            except Exception as e:
+                print('Warning: failed to load optimizer state on CPU:', e)
 
-        for i in range(0, start_epoch):
+        for _ in range(start_epoch):
             scheduler.step()
-        new_lr = scheduler.get_lr()[0]
+
+        try:
+            new_lr = scheduler.get_last_lr()[0]
+        except Exception:
+            new_lr = scheduler.get_lr()[0]
+
         print('------------------------------------------------------------------------------')
         print("==> Resuming Training with learning rate:", new_lr)
         print('------------------------------------------------------------------------------')
 
-    if len(device_ids) > 1:
-        model_restoration = nn.DataParallel(model_restoration, device_ids=device_ids)
-
-    ##data prepare
-    test_files_dirs=sorted(os.listdir(os.path.join(opt.father_test_path_npz, 'blur')))
+    ## data prepare
+    test_files_dirs = sorted(os.listdir(os.path.join(opt.father_test_path_npz, 'blur')))
 
     ######### DataLoaders ###########
-
     print('===> Loading datasets')
 
-    epoch=0
+    epoch = 0
+
     #### Evaluation ####
     if epoch % opt.TRAINING.VAL_AFTER_EVERY == 0:
         model_restoration.eval()
@@ -146,28 +173,34 @@ def main():
         ssim_val_rgb = []
 
         for test_file in test_files_dirs:
-
             single_psnr_val_rgb = []
             single_ssim_val_rgb = []
+
             out_path = os.path.join(opt.result_dir, test_file)
-            isExists = os.path.exists(out_path)
-            if not isExists:
+            if not os.path.exists(out_path):
                 os.makedirs(out_path)
 
-            val_dataset = DataLoaderTest_npz(opt.father_test_path_npz, test_file,opt)
-            val_loader = DataLoader(dataset=val_dataset, batch_size=1, shuffle=False, num_workers=4, drop_last=False,
-                                    pin_memory=True)
+            val_dataset = DataLoaderTest_npz(opt.father_test_path_npz, test_file, opt)
+            val_loader = DataLoader(
+                dataset=val_dataset,
+                batch_size=1,
+                shuffle=False,
+                num_workers=0,      # CPU 下建议 0，最稳
+                drop_last=False,
+                pin_memory=False    # CPU 下不需要
+            )
+
             for ii, data_val in enumerate(tqdm(val_loader), 0):
-                input_img = data_val[0].cuda()
-                input_event = data_val[1].cuda()
-                input_target = data_val[2].cuda()
+                input_img = data_val[0].to(device)
+                input_event = data_val[1].to(device)
+                input_target = data_val[2].to(device)
 
                 with torch.no_grad():
                     restored = model_restoration(input_img, input_event)
 
+                res = torch.clamp(restored, 0, 1)[0, :, :, :]
+                tar = input_target[0, :, :, :]
 
-                res = torch.clamp(restored, 0, 1)[0, :, :, :]  ##
-                tar=input_target[0, :, :, :]
                 input1 = res.cpu().numpy().transpose([1, 2, 0])
                 input2 = tar.cpu().numpy().transpose([1, 2, 0])
 
@@ -181,29 +214,23 @@ def main():
 
                 output = restored[0, :, :, :] * 255
                 output.clamp_(0.0, 255.0)
-                output = output.byte()
-                output = output.cpu().numpy()
-                output = output.transpose([1, 2, 0])  # height * width * channel
+                output = output.byte().cpu().numpy().transpose([1, 2, 0])
 
                 fname = f"{ii:04d}_psnr{psnr_rgb:.2f}_ssim{ssim_rgb:.4f}.png"
                 cv2.imwrite(os.path.join(out_path, fname), output)
 
-                # torch.cuda.empty_cache()
-
-
-            print("Name: %s PSNR: %.4f SSIM: %.4f" % (test_file,np.mean(single_psnr_val_rgb),np.mean(single_ssim_val_rgb)))
-
+            print("Name: %s PSNR: %.4f SSIM: %.4f" % (
+                test_file,
+                np.mean(single_psnr_val_rgb),
+                np.mean(single_ssim_val_rgb))
+            )
 
         ssim_val_rgb = np.mean(ssim_val_rgb)
         psnr_val_rgb = np.mean(psnr_val_rgb)
 
-    print('ALL_SSIM', np.mean(ssim_val_rgb))
-    print('ALL_PSNR', np.mean(psnr_val_rgb))
+        print('ALL_SSIM', ssim_val_rgb)
+        print('ALL_PSNR', psnr_val_rgb)
 
 
-
-#
 if __name__ == '__main__':
     main()
-
-

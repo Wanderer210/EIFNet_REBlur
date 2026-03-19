@@ -8,7 +8,7 @@ VERBOSE: True
 
 MODEL:
   MODE: 'Deblurring'
-  SESSION: 'EIFNet'
+  SESSION: 'EIFNet_REBlur'
 
 # Optimization arguments.
 OPTIM:
@@ -31,4 +31,7 @@ TRAINING:
 #  TRAIN_DIR: '/media/6T/GOPRO_Large_all' # path to training data
 #  VAL_DIR: '/media/6T/GOPRO_Large_all'    # path to validation data
   SAVE_DIR: './checkpoints'     # path to save models and images
+# father_train_path_npz: './Datasets/REBlur/train'
+# father_val_path_npz: './Datasets/REBlur/test'
+# pretrained_path: './checkpoints/models/EIFNet/model_best_psnr.pth'
   # SAVE_IMAGES: False
