@@ -53,7 +53,7 @@ import time
 import numpy as np
 import utils
 # from dataset_RGB import DataLoaderTrain_npy, DataLoaderVal_npy,create_data_loader,DataLoaderTrain_npz,DataLoaderVal_npz
-from dataset_REBlur import DataLoaderTrain_REBlur_h5, DataLoaderVal_REBlur_h5, create_data_loader, collect_h5_files
+from dataset_REBlur import DataLoaderTrain_Fast, DataLoaderVal_Fast, create_data_loader
 from U_model import unet
 import losses
 import glob
@@ -128,8 +128,7 @@ def main():
 
     ######### Resume ###########
     if opt.TRAINING.RESUME:
-        path_chk_rest = utils.get_last_path(model_dir, '_best_psnr.pth')
-        # path_chk_rest = os.path.join(model_dir, "model_deblurring.pth")
+        path_chk_rest = [os.path.join(model_dir, "model_latest.pth")]        # path_chk_rest = os.path.join(model_dir, "model_deblurring.pth")
 
         print('path_chk_rest', path_chk_rest)
         utils.load_checkpoint(model_restoration, path_chk_rest[0])
@@ -153,19 +152,18 @@ def main():
     criterion = nn.MSELoss()
 
 ######### DataLoaders ###########
-    # 训练集加载
-    train_h5_files = collect_h5_files(opt.father_train_path_h5)
-    train_dataset = DataLoaderTrain_REBlur_h5(train_h5_files, opt)
+    print('===> Loading FAST datasets')
+    # 注意把路径换成刚刚脚本跑出来的离线缓存目录
+    train_fast_dir = '/home/zy/data/zy/zhaoyue/Datasets/EIFNet_REBlur/REBlur_Fast/train'
+    val_fast_dir = '/home/zy/data/zy/zhaoyue/Datasets/EIFNet_REBlur/REBlur_Fast/test'
+    
+    train_dataset = DataLoaderTrain_Fast(train_fast_dir, opt)
     train_loader = create_data_loader(train_dataset, opt)
     
-    # 验证集加载
-    val_h5_files = collect_h5_files(opt.father_val_path_h5)
-    val_dataset = DataLoaderVal_REBlur_h5(val_h5_files, opt)
-    val_loader = DataLoader(dataset=val_dataset, batch_size=4, shuffle=False, num_workers=4, drop_last=False,
-                            pin_memory=True)
-                            
+    val_dataset = DataLoaderVal_Fast(val_fast_dir, opt)
+    val_loader = DataLoader(dataset=val_dataset, batch_size=4, shuffle=False, num_workers=4, drop_last=False, pin_memory=True)
+    
     print('===> Start Epoch {} End Epoch {}'.format(start_epoch, opt.OPTIM.NUM_EPOCHS + 1))
-    print('===> Loading datasets')
 
     best_psnr = 0
     best_epoch = 0

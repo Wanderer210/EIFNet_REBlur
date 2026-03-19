@@ -48,6 +48,11 @@ Thanks to the inspirations and codes from [MPRNet](https://github.com/swz30/MPRN
 
 
 
-
-1. 加载Gopro权重微调REBlur数据集
+1. 先将数据处理为体素网格，避免训练时每轮处理太慢
+python process_REBlur.py
+2. 加载Gopro权重微调REBlur数据集
 python REBlur_funtine_train.py
+ best_epoch 26 Best_PSNR 35.1029 Best_SSIM 0.9763  (37.81	0.976)
+
+3. 直接用Gopro权重测试REBlur数据集
+python main_test_REBlur.py

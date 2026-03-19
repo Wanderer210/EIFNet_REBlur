@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 # from detectron2.layers import ModulatedDeformConv
 from torch.nn import init as init
 from torch.nn.modules.batchnorm import _BatchNorm
@@ -60,6 +61,8 @@ class SkipUpSample(nn.Module):
 
     def forward(self, x, y):
         x = self.up(x)
+        if x.shape[-2:] != y.shape[-2:]:
+            x = F.interpolate(x, size=y.shape[-2:], mode='bilinear', align_corners=False)
         x = x + y
         return x
     

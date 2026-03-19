@@ -9,7 +9,7 @@ import torch
 import torch.utils.data as data
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.sampler import Sampler
-
+import cv2
 import utils
 
 
@@ -301,10 +301,14 @@ class SubsetSequentialSampler(Sampler):
 
 
 def create_data_loader(data_set, opts, mode='train'):
-    total_samples = opts.train_iters * opts.OPTIM.BATCH_SIZE
-    num_epochs = int(math.ceil(float(total_samples) / len(data_set)))
+    dataset_len = len(data_set)
+    if dataset_len == 0:
+        raise ValueError(f'Empty dataset for mode={mode}. Please check data paths and preprocessing outputs.')
 
-    indices = np.random.permutation(len(data_set))
+    total_samples = opts.train_iters * opts.OPTIM.BATCH_SIZE
+    num_epochs = int(math.ceil(float(total_samples) / dataset_len))
+
+    indices = np.random.permutation(dataset_len)
     indices = np.tile(indices, num_epochs)
     indices = indices[:total_samples]
 
@@ -319,3 +323,83 @@ def create_data_loader(data_set, opts, mode='train'):
         drop_last=False
     )
     return data_loader
+
+
+import glob
+
+class DataLoaderTrain_Fast(Dataset):
+    """极速版训练集：直接读取预计算的 npy 和 png，无需实时计算 voxel"""
+    def __init__(self, processed_dir, args):
+        self.args = args
+        self.samples = []
+        seq_dirs = sorted(glob.glob(os.path.join(processed_dir, '*')))
+        
+        for seq in seq_dirs:
+            if not os.path.isdir(seq): continue
+            blur_files = sorted(glob.glob(os.path.join(seq, 'blur', '*.png')))
+            for b_file in blur_files:
+                frame_name = os.path.basename(b_file).replace('.png', '')
+                s_file = os.path.join(seq, 'sharp', f"{frame_name}.png")
+                v_file = os.path.join(seq, 'voxel', f"{frame_name}.npy")
+                
+                if os.path.exists(s_file) and os.path.exists(v_file):
+                    self.samples.append((b_file, v_file, s_file))
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        b_path, v_path, s_path = self.samples[idx]
+
+        # 读取图像并转换回 RGB 和 CHW 的 Float32 格式
+        blur_img = cv2.imread(b_path)
+        blur_img = cv2.cvtColor(blur_img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+        blur_img = blur_img.transpose(2, 0, 1)
+
+        sharp_img = cv2.imread(s_path)
+        sharp_img = cv2.cvtColor(sharp_img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+        sharp_img = sharp_img.transpose(2, 0, 1)
+
+        # 极速读取体素张量 (无需通过复杂的插值计算)
+        event_voxel = np.load(v_path)
+
+        # 进行随机裁剪、翻转等数据增强操作
+        input_img, input_event, target = utils.image_proess(
+            blur_img, event_voxel, sharp_img, self.args.TRAINING.TRAIN_PS, self.args
+        )
+        return input_img, input_event, target
+
+class DataLoaderVal_Fast(Dataset):
+    """极速版验证集：返回全尺寸 Tensor，不进行裁切增强"""
+    def __init__(self, processed_dir, args):
+        # 初始化逻辑与 DataLoaderTrain_Fast 完全一致
+        self.args = args
+        self.samples = []
+        seq_dirs = sorted(glob.glob(os.path.join(processed_dir, '*')))
+        for seq in seq_dirs:
+            if not os.path.isdir(seq): continue
+            blur_files = sorted(glob.glob(os.path.join(seq, 'blur', '*.png')))
+            for b_file in blur_files:
+                frame_name = os.path.basename(b_file).replace('.png', '')
+                s_file = os.path.join(seq, 'sharp', f"{frame_name}.png")
+                v_file = os.path.join(seq, 'voxel', f"{frame_name}.npy")
+                if os.path.exists(s_file) and os.path.exists(v_file):
+                    self.samples.append((b_file, v_file, s_file))
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        b_path, v_path, s_path = self.samples[idx]
+
+        blur_img = cv2.imread(b_path)
+        blur_img = cv2.cvtColor(blur_img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+        blur_img = blur_img.transpose(2, 0, 1)
+
+        sharp_img = cv2.imread(s_path)
+        sharp_img = cv2.cvtColor(sharp_img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+        sharp_img = sharp_img.transpose(2, 0, 1)
+
+        event_voxel = np.load(v_path)
+
+        return torch.from_numpy(blur_img), torch.from_numpy(event_voxel), torch.from_numpy(sharp_img)
