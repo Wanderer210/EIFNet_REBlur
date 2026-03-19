@@ -47,3 +47,7 @@ Install warmup scheduler
 Thanks to the inspirations and codes from [MPRNet](https://github.com/swz30/MPRNet)
 
 
+
+
+1. 加载Gopro权重微调REBlur数据集
+python REBlur_funtine_train.py

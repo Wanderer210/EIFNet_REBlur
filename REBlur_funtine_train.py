@@ -1,4 +1,3 @@
-
 import torch
 
 print(torch.__version__)
@@ -53,7 +52,8 @@ import random
 import time
 import numpy as np
 import utils
-from dataset_RGB import DataLoaderTrain_npy, DataLoaderVal_npy,create_data_loader,DataLoaderTrain_npz,DataLoaderVal_npz
+# from dataset_RGB import DataLoaderTrain_npy, DataLoaderVal_npy,create_data_loader,DataLoaderTrain_npz,DataLoaderVal_npz
+from dataset_REBlur import DataLoaderTrain_REBlur_h5, DataLoaderVal_REBlur_h5, create_data_loader, collect_h5_files
 from U_model import unet
 import losses
 import glob
@@ -152,12 +152,18 @@ def main():
     criterion_edge = losses.EdgeLoss()
     criterion = nn.MSELoss()
 
-    ######### DataLoaders ###########
-    train_dataset = DataLoaderTrain_npz(opt.father_train_path_npz, opt)
-    train_loader= create_data_loader(train_dataset, opt)
-    val_dataset = DataLoaderVal_npz(opt.father_val_path_npz, opt)
+######### DataLoaders ###########
+    # 训练集加载
+    train_h5_files = collect_h5_files(opt.father_train_path_h5)
+    train_dataset = DataLoaderTrain_REBlur_h5(train_h5_files, opt)
+    train_loader = create_data_loader(train_dataset, opt)
+    
+    # 验证集加载
+    val_h5_files = collect_h5_files(opt.father_val_path_h5)
+    val_dataset = DataLoaderVal_REBlur_h5(val_h5_files, opt)
     val_loader = DataLoader(dataset=val_dataset, batch_size=4, shuffle=False, num_workers=4, drop_last=False,
                             pin_memory=True)
+                            
     print('===> Start Epoch {} End Epoch {}'.format(start_epoch, opt.OPTIM.NUM_EPOCHS + 1))
     print('===> Loading datasets')
 

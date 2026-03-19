@@ -2,7 +2,7 @@
 ## 
 ####
 
-GPU: []
+GPU: [0,1]
 
 VERBOSE: True
 
@@ -13,9 +13,9 @@ MODEL:
 # Optimization arguments.
 OPTIM:
   BATCH_SIZE: 8
-  NUM_EPOCHS: 500
+  NUM_EPOCHS: 50
   # NEPOCH_DECAY: [10]
-  LR_INITIAL: 2e-4
+  LR_INITIAL: 1e-4
   LR_MIN: 1e-6
   # BETA1: 0.9
   
@@ -31,7 +31,8 @@ TRAINING:
 #  TRAIN_DIR: '/media/6T/GOPRO_Large_all' # path to training data
 #  VAL_DIR: '/media/6T/GOPRO_Large_all'    # path to validation data
   SAVE_DIR: './checkpoints'     # path to save models and images
-# father_train_path_npz: './Datasets/REBlur/train'
-# father_val_path_npz: './Datasets/REBlur/test'
-# pretrained_path: './checkpoints/models/EIFNet/model_best_psnr.pth'
+
+father_train_path_h5: /home/zy/data/zy/zhaoyue/Datasets/EIFNet_REBlur/REBlur_rawevents/train
+father_val_path_h5: /home/zy/data/zy/zhaoyue/Datasets/EIFNet_REBlur/REBlur_rawevents/test
+father_test_path_h5: /home/zy/data/zy/zhaoyue/Datasets/EIFNet_REBlur/REBlur_rawevents/test
   # SAVE_IMAGES: False
